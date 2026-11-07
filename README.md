@@ -1,50 +1,66 @@
 # Telegram Translator Bot
 
-A Telegram bot that translates forwarded messages using a locally hosted TranslateGemma model served by Ollama.
+A Telegram bot project for translating forwarded messages with a locally hosted TranslateGemma model served by Ollama.
 
-For the demo, a user forwards a Spanish message to the bot. The bot detects the source language, translates the message into English, and returns a word-and-phrase breakdown with any context needed to understand the message.
+The current implementation prepares forwarded text, splits it into word-limited chunks, and tracks vocabulary. The Ollama translation and explanation steps are still planned.
 
-## 🌟 Demo Example
+## Current Functionality
 
-**User forwards a message:**
-> "No me tomes el pelo, que ya sé cómo va esto."
+- Handles forwarded text messages and captions.
+- Removes URLs and Unicode symbols from the text before processing.
+- Splits prepared text into chunks according to `MAX_MESSAGE_WORDS`.
+- Uses a `TranslatorService` interface so language-specific word segmentation can be implemented by subclasses.
+- Includes `ChineseTranslator`, which uses `jieba` to segment text and keeps only tokens made entirely of Han characters.
+- Tracks unique words as `Word` dataclass entries. Each entry records the original text, normalized form, and whether it was new when encountered.
+- Provides `/list`, which displays the tracked vocabulary in a table-like format.
+- Reports the prepared word and chunk counts after sending the chunks.
 
-**Bot response:**
-**Detected Language:** Spanish 🇪🇸
-**English Translation:** "Don't pull my leg; I already know how this works."
+The tracked vocabulary is held in memory, so it resets when the bot restarts.
 
-**Word & Phrase Breakdown:**
-- `No me tomes el pelo` $\rightarrow$ (Idiom) Literally "don't take my hair," meaning "don't fool me."
-- `Ya sé` $\rightarrow$ "I already know."
-- `Cómo va esto` $\rightarrow$ "How this goes/works."
+## Example
 
-**Contextual Meaning:**
-The speaker is expressing skepticism and signaling that they are aware of the true nature of the situation.
+A user forwards a message containing Chinese text. The bot prepares and sends its chunks, then reports the word and chunk counts. Use `/list` to view the unique Han-character words recorded by the bot.
 
----
+## Planned Translation Flow
 
-## ⚙️ How It Works
+The intended end-to-end workflow is:
 
-1. The user forwards a foreign-language message to the Telegram bot.
-2. The bot extracts the message text.
+1. The user forwards a foreign-language message to the bot.
+2. The bot extracts the message text or caption.
 3. The bot sends the text to the local Ollama server.
-4. TranslateGemma identifies the language and produces an English translation.
-5. The bot requests a separate word/phrase breakdown and contextual explanation.
-6. The bot formats and sends the result back to the user.
+4. TranslateGemma identifies the source language and translates the message into English.
+5. A separate explanation step generates a word-and-phrase breakdown and contextual meaning.
+6. The bot formats and sends the translation and explanation to the user.
 
-## 🏗️ Architecture
+## Architecture
 
-- **Telegram Bot:** Receives forwarded messages and sends replies.
-- **Ollama:** Runs locally and exposes the TranslateGemma model via a REST API.
-- **TranslateGemma:** Detects the source language and provides the core translation.
-- **Explanation Layer:** A secondary prompt sequence that analyzes the translation to produce the linguistic breakdown and contextual notes.
+- **Telegram bot:** Receives forwarded messages and sends replies.
+- **`TranslatorService`:** Shared interface and processing logic for cleaning, tracking, and chunking text.
+- **`ChineseTranslator`:** Implements Chinese word segmentation with `jieba`.
+- **Ollama and TranslateGemma:** Planned translation backend.
+- **Explanation layer:** Planned separate prompt step for phrase breakdown and context.
 
-## 🗺️ Roadmap
+## Configuration
 
-- [ ] Implement Telegram bot message listener for forwarded texts
-- [ ] Integrate Ollama API for communication with the local server
-- [ ] Configure TranslateGemma for automatic language detection
-- [ ] Develop the prompt engineering for English translation output
-- [ ] Create a logic flow for generating the word-by-word breakdown
-- [ ] Build the "contextual meaning" inference system
-- [ ] Design the final response template for a clean user experience in Telegram
+Create a `.env` file:
+
+```env
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+MAX_MESSAGE_WORDS=100
+```
+
+`MAX_MESSAGE_WORDS` controls the maximum number of segmented words per chunk. For Chinese, a segmented word may contain multiple characters.
+
+## Roadmap
+
+- [x] Handle forwarded text and captions
+- [x] Remove links and Unicode symbols before processing
+- [x] Split prepared text into configurable chunks
+- [x] Add language-specific word segmentation through `TranslatorService`
+    - [x] Add Chinese segmentation and Han-character filtering
+- [x] Track unique words and list them with `/list`
+- [ ] Integrate the local Ollama API
+- [ ] Configure TranslateGemma translation and source-language detection
+- [ ] Generate word-and-phrase breakdowns
+- [ ] Generate contextual explanations
+- [ ] Format and send the complete translation response in Telegram
