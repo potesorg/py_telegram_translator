@@ -2,7 +2,8 @@ import logging
 import re
 import unicodedata
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from ollama import QwenService
+from dataclasses import dataclass, replace
 
 import jieba
 
@@ -39,9 +40,8 @@ class PreparedMessage:
     removed_links: int
     removed_symbols: int
 
-
 class TranslatorService(ABC):
-    """Shared message preparation with language-specific word splitting."""
+    """Shared text preparation with language-specific word splitting."""
 
     def __init__(self, max_words: int) -> None:
         if max_words < 1:
@@ -50,33 +50,12 @@ class TranslatorService(ABC):
         self.max_words = max_words
         self.seen_words: dict[str, Word] = {}
 
-
     @abstractmethod
     def _split_words(self, text: str) -> list[str]:
         """Split cleaned text into language-specific words."""
         raise NotImplementedError
 
-   
-    def _record_words(self, words: list[str]) -> tuple[Word, ...]:
-        entries: list[Word] = []
-
-        for text in words:
-            normalized = text.casefold()
-            is_new = normalized not in self.seen_words
-            word = Word(text=text, normalized=normalized, is_new=is_new)
-            entries.append(word)
-
-            if is_new:
-                self.seen_words[normalized] = word
-
-        return tuple(entries)
-
-
-    def prepare_message(self, text: str) -> PreparedMessage:
-        """Remove links and symbols, split, track, and chunk the text."""
-        if not isinstance(text, str):
-            raise TypeError("text must be a string")
-
+    def _clean_text(self, text: str) -> tuple[str, int, int]:
         text_without_links, removed_links = _URL_PATTERN.subn(" ", text)
 
         cleaned_characters: list[str] = []
@@ -93,7 +72,29 @@ class TranslatorService(ABC):
             r"\s+", " ", "".join(cleaned_characters)
         ).strip()
 
+        return cleaned_text, removed_links, removed_symbols
+
+    def _record_words(self, words: list[str]) -> tuple[Word, ...]:
+        entries: list[Word] = []
+
+        for text in words:
+            normalized = text.casefold()
+            is_new = normalized not in self.seen_words
+            word = Word(text=text, normalized=normalized, is_new=is_new)
+            entries.append(word)
+
+            if is_new:
+                self.seen_words[normalized] = word
+
+        return tuple(entries)
+
+    def prepare_message(self, text: str) -> PreparedMessage:
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+
+        cleaned_text, removed_links, removed_symbols = self._clean_text(text)
         word_entries = self._record_words(self._split_words(cleaned_text))
+
         chunks = tuple(
             " ".join(
                 word.text
@@ -122,6 +123,11 @@ class TranslatorService(ABC):
 
 class ChineseTranslator(TranslatorService):
     """Prepares Chinese text using jieba word segmentation."""
+
+
+    def __init__(self, max_words: int) -> None:
+        super().__init__(max_words)
+        self.qwen_service = QwenService()
 
 
     @staticmethod
@@ -174,7 +180,41 @@ class ChineseTranslator(TranslatorService):
         return tuple(entries)
     
 
+    def prepare_message(self, text: str) -> PreparedMessage:
+        prepared = super().prepare_message(text)
 
+        translated_chunks: list[str] = []
+
+        for original_chunk in prepared.chunks:
+            translated_text = self.qwen_service.translate(
+                text=original_chunk
+            ).strip()
+
+            # Keep any list-style breakdown returned by the model.
+            entries: list[str] = []
+            for line in translated_text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+
+                if line.startswith(("- ", "* ")):
+                    line = line[2:].strip()
+
+                entries.append(line)
+
+            translation = "\n".join(entries)
+
+            logger.info(
+                "[original] - %s\n[translated] - %s",
+                original_chunk,
+                translation,
+            )
+
+            translated_chunks.append(
+                f"[original]\n{original_chunk}\n[translated]\n{translation}"
+            )
+
+        return replace(prepared, chunks=tuple(translated_chunks))
 
 
     def _split_words(self, text: str) -> list[str]:
